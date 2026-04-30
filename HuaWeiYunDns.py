@@ -42,27 +42,37 @@ class HuaWeiDNSManager:
             print(f"❌ 获取 Zone ID 失败: {e}")
             return None
 
-    def sync_dns(self, root_domain, carrier_ips):
-        """同步多线路 IP"""
+def sync_dns(self, root_domain, carrier_ips):
+        """同步多线路 IP，并强制默认线路跟随电信"""
         zone_id = self.get_zone_id(root_domain)
         if not zone_id:
             print(f"❌ 错误: 未找到域名 {root_domain} 的解析区")
             return
 
-        full_name = f"{root_domain}" if root_domain.endswith('.') else f"{root_domain}."
+        full_name = root_domain if root_domain.endswith('.') else f"{root_domain}."
 
         try:
+            # 获取现有记录
             req = ListRecordSetsWithLineRequest()
             req.zone_id = zone_id
             req.name = full_name
             req.type = "A"
             resp = self.client.list_record_sets_with_line(req)
-            
             existing_map = {rs.line: rs for rs in resp.recordsets}
 
-            for carrier, new_ips in carrier_ips.items():
-                if not new_ips: continue
+            # 准备待同步的任务列表
+            sync_tasks = []
+            for carrier, ips in carrier_ips.items():
+                if not ips: continue
                 line_code = self.get_line_code(carrier)
+                sync_tasks.append((carrier, line_code, ips))
+                
+                # 【新增逻辑】如果当前是电信，则额外增加一个“默认”线路的任务
+                if carrier == "电信":
+                    sync_tasks.append(("默认(跟随电信)", "default_view", ips))
+
+            # 执行同步
+            for task_name, line_code, new_ips in sync_tasks:
                 new_ips_sorted = sorted(new_ips)
 
                 if line_code in existing_map:
@@ -70,16 +80,16 @@ class HuaWeiDNSManager:
                     old_ips_sorted = sorted(rs.records)
 
                     if old_ips_sorted == new_ips_sorted:
-                        print(f"✅ [{carrier}] 无变动，跳过。")
+                        print(f"✅ [{task_name}] 无变动，跳过。")
                     else:
-                        print(f"🔄 [{carrier}] 更新: {old_ips_sorted} -> {new_ips_sorted}")
+                        print(f"🔄 [{task_name}] 更新: {old_ips_sorted} -> {new_ips_sorted}")
                         update_req = UpdateRecordSetRequest()
                         update_req.zone_id = zone_id
                         update_req.recordset_id = rs.id
                         update_req.body = UpdateRecordSetReq(records=new_ips_sorted)
                         self.client.update_record_set(update_req)
                 else:
-                    print(f"⚠️ [{carrier}] 华为云缺少 '{line_code}' 线路记录，请先手动创建。")
+                    print(f"⚠️ [{task_name}] 华为云缺少 '{line_code}' 线路记录，请先手动创建。")
 
         except exceptions.ClientRequestException as e:
             print(f"❌ API 异常: {e.error_msg}")

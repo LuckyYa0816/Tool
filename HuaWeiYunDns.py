@@ -32,14 +32,17 @@ def update_huawei_dns(ips):
     # 华为云国际版 API 节点 (若不同请根据实际 Region 更改，如 ap-southeast-1)
     client = DnsClient.new_builder() \
         .with_credentials(credentials) \
-        .with_region(DnsRegion.value_of("ap-southeast-3")) \
+        .with_region(DnsRegion.value_of("ap-southeast-1")) \
         .build()
 
     # 华为云线路名称映射
     line_map = {"电信": "Dianxin", "联通": "Liantong", "移动": "Yidong"}
 
     # 获取当前域名的现有解析记录
-    request = ListRecordSetsRequest(zone_id=ZONE_ID, name=DOMAIN, type="A")
+    request = ListRecordSetsRequest()
+    request.zone_id = ZONE_ID
+    request.name = DOMAIN
+    request.type = "A"
     response = client.list_record_sets(request)
     
     existing_records = {record.line: record for record in response.recordsets}

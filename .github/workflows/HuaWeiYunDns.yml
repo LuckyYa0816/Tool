@@ -25,6 +25,6 @@ jobs:
         env:
           HW_AK: ${{ secrets.HW_AK }}
           HW_SK: ${{ secrets.HW_SK }}
-          HW_ZONE_ID: ${{ secrets.HW_ZONE_ID }}
-          DOMAIN: ${{ secrets.DOMAIN }}
+          HW_PROJECT_ID: ${{ secrets.HW_PROJECT_ID }}
+          HW_REGION: ${{ secrets.HW_REGION }}
         run: python HuaWeiYunDns.py

@@ -85,17 +85,27 @@ class HuaWeiDNSManager:
             print(f"❌ API 异常: {e.error_msg}")
 
 def get_best_ips():
-    """获取三网最优各 3 个 IP"""
+    """获取三网最优各 3 个 IP，并剔除端口号"""
     url = "https://bestcf.pages.dev/vvhan/ipv4.txt"
     try:
         res = requests.get(url, timeout=15).text.splitlines()
         ips = {"电信": [], "联通": [], "移动": []}
         for line in res:
             if not line.strip(): continue
-            ip = line.split()[0].split('#')[0].split(',')[0].strip()
+            
+            # 1. 拿到原始字符串，例如 "162.159.19.14:443#电信"
+            raw_ip_part = line.split()[0]
+            
+            # 2. 依次切掉注释符 # 和 分隔符 ,
+            raw_ip_part = raw_ip_part.split('#')[0].split(',')[0].strip()
+            
+            # 3. 【关键修复】切掉端口号 : (如果有的话)
+            # 这样 "162.159.19.14:443" 就会变成 "162.159.19.14"
+            pure_ip = raw_ip_part.split(':')[0]
+            
             for key in ips.keys():
                 if key in line and len(ips[key]) < 3:
-                    ips[key].append(ip)
+                    ips[key].append(pure_ip)
         return ips
     except Exception as e:
         print(f"❌ IP 抓取失败: {e}")

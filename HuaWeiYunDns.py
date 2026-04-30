@@ -109,8 +109,8 @@ if __name__ == '__main__':
     region = os.getenv("HW_REGION", "ap-southeast-1")
     
     # 你的域名信息
-    ROOT_DOMAIN = "19990816.xyz."
-    SUB_DOMAIN = "cfyx"
+    ROOT_DOMAIN = "cfyx.19990816.xyz."
+    SUB_DOMAIN = ""
 
     best_ips = get_best_ips()
     

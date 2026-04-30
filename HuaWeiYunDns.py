@@ -123,7 +123,7 @@ if __name__ == '__main__':
     
     # 目标域名配置
     MY_ROOT_DOMAIN = "19990816.xyz." # 记得带点
-    MY_SUB_DOMAIN = "proxy"          # 你的子域名
+    MY_SUB_DOMAIN = "cfyx"          # 你的子域名
     # ---------------------------------------
 
     # 1. 获取最优 IP

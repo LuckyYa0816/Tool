@@ -110,7 +110,7 @@ if __name__ == '__main__':
     
     # 你的域名信息
     ROOT_DOMAIN = "19990816.xyz."
-    SUB_DOMAIN = "proxy"
+    SUB_DOMAIN = "cfyx"
 
     best_ips = get_best_ips()
     

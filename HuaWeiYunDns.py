@@ -1,93 +1,137 @@
-# coding: utf-8
+# -*- coding: utf-8 -*-
 import os
 import requests
 from huaweicloudsdkcore.auth.credentials import BasicCredentials
+from huaweicloudsdkdns.v2 import *
 from huaweicloudsdkdns.v2.region.dns_region import DnsRegion
 from huaweicloudsdkcore.exceptions import exceptions
-from huaweicloudsdkdns.v2 import *
 
-# 配置信息（建议通过 GitHub Secrets 注入）
-AK = os.getenv("CLOUD_SDK_AK")
-SK = os.getenv("CLOUD_SDK_SK")
-ZONE_ID = os.getenv("HW_ZONE_ID")
-DOMAIN = os.getenv("DOMAIN") # 例如: proxy.19990816.xyz. (注意：华为云API匹配通常需要末尾的点)
+class HuaWeiDNSManager:
+    def __init__(self, ak, sk, region_id, project_id=None):
+        self.ak = ak
+        self.sk = sk
+        self.region = region_id
+        
+        # 1. 初始化凭证，显式传入 project_id 解决之前的 400 认证错误
+        credentials = BasicCredentials(self.ak, self.sk)
+        if project_id:
+            credentials.with_project_id(project_id)
+            
+        self.client = DnsClient.new_builder() \
+            .with_credentials(credentials) \
+            .with_region(DnsRegion.value_of(self.region)) \
+            .build()
+
+    def get_line_code(self, carrier_name):
+        """将中文运营商名称转换为华为云线路代码"""
+        lines = {
+            '电信': 'Dianxin',
+            '联通': 'Liantong',
+            '移动': 'Yidong',
+            '默认': 'default_view'
+        }
+        return lines.get(carrier_name, 'default_view')
+
+    def get_zone_id(self, domain):
+        """根据域名自动获取 Zone ID"""
+        try:
+            request = ListPublicZonesRequest()
+            response = self.client.list_public_zones(request)
+            # 华为云 API 匹配通常需要末尾带点，如 19990816.xyz.
+            search_name = domain if domain.endswith('.') else f"{domain}."
+            for zone in response.zones:
+                if zone.name == search_name:
+                    return zone.id
+            return None
+        except Exception as e:
+            print(f"❌ 获取 Zone ID 失败: {e}")
+            return None
+
+    def sync_dns(self, root_domain, sub_domain, carrier_ips):
+        """同步三网 IP 到华为云"""
+        zone_id = self.get_zone_id(root_domain)
+        if not zone_id:
+            print(f"❌ 错误: 在该账号下未找到域名 {root_domain} 的解析区")
+            return
+
+        # 构造完整记录名，如 proxy.19990816.xyz.
+        full_name = f"{sub_domain}.{root_domain}" if root_domain.endswith('.') else f"{sub_domain}.{root_domain}."
+
+        try:
+            # 获取该子域名现有的所有线路记录
+            req = ListRecordSetsWithLineRequest()
+            req.zone_id = zone_id
+            req.name = full_name
+            req.type = "A"
+            resp = self.client.list_record_sets_with_line(req)
+            
+            # 建立现有记录映射 { 'Dianxin': rs_object }
+            existing_map = {rs.line: rs for rs in resp.recordsets}
+
+            for carrier, new_ips in carrier_ips.items():
+                if not new_ips: continue
+                line_code = self.get_line_code(carrier)
+                new_ips_sorted = sorted(new_ips)
+
+                if line_code in existing_map:
+                    rs = existing_map[line_code]
+                    old_ips_sorted = sorted(rs.records)
+
+                    if old_ips_sorted == new_ips_sorted:
+                        print(f"✅ [{carrier}] 记录已是最新 ({new_ips_sorted})，跳过更新。")
+                    else:
+                        print(f"🔄 [{carrier}] 检测到变动: {old_ips_sorted} -> {new_ips_sorted}")
+                        update_req = UpdateRecordSetRequest()
+                        update_req.zone_id = zone_id
+                        update_req.recordset_id = rs.id
+                        # 更新该线路下的 3 个 IP
+                        update_req.body = UpdateRecordSetReq(records=new_ips_sorted)
+                        self.client.update_record_set(update_req)
+                else:
+                    print(f"⚠️ [{carrier}] 华为云中未找到对应线路记录，请先手动创建 '{line_code}' 线路的 A 记录。")
+
+        except exceptions.ClientRequestException as e:
+            print(f"❌ API 调用异常: {e.error_msg}")
 
 def get_best_ips():
-    """获取接口数据并筛选三网最优各3个IP"""
+    """获取接口数据并筛选三网最优各 3 个 IP"""
     url = "https://bestcf.pages.dev/vvhan/ipv4.txt"
     try:
-        lines = requests.get(url).text.splitlines()
+        print(f"🌐 正在从接口获取最新 IP...")
+        res = requests.get(url, timeout=15).text.splitlines()
     except Exception as e:
-        print(f"获取 IP 接口失败: {e}")
+        print(f"❌ 抓取 IP 接口失败: {e}")
         return {}
 
     ips = {"电信": [], "联通": [], "移动": []}
-    for line in lines:
+    for line in res:
         if not line.strip(): continue
-        parts = line.split()
-        ip = parts[0].split('#')[0].split(',')[0].strip()
+        # 提取 IP (处理包含 # 或 , 的情况)
+        ip = line.split()[0].split('#')[0].split(',')[0].strip()
         
-        if "电信" in line and len(ips["电信"]) < 3: ips["电信"].append(ip)
-        elif "联通" in line and len(ips["联通"]) < 3: ips["联通"].append(ip)
-        elif "移动" in line and len(ips["移动"]) < 3: ips["移动"].append(ip)
+        for key in ips.keys():
+            if key in line and len(ips[key]) < 3:
+                ips[key].append(ip)
     return ips
 
-# 建议在 GitHub Secrets 中增加一个 HW_PROJECT_ID 变量
-PROJECT_ID = os.getenv("HW_PROJECT_ID") 
+if __name__ == '__main__':
+    # --- 配置区 (通过 GitHub Secrets 注入) ---
+    AK = os.getenv("CLOUD_SDK_AK")
+    SK = os.getenv("CLOUD_SDK_SK")
+    PRJ_ID = os.getenv("HW_PROJECT_ID") # 解决 400 错误的关键
+    REGION = os.getenv("HW_REGION", "ap-southeast-1")
+    
+    # 目标域名配置
+    MY_ROOT_DOMAIN = "19990816.xyz." # 记得带点
+    MY_SUB_DOMAIN = "proxy"          # 你的子域名
+    # ---------------------------------------
 
-def sync_dns():
-    best_ips = get_best_ips()
-    if not any(best_ips.values()):
-        print("未获取到有效 IP，任务终止")
-        return
-
-    # 修改这里：显式指定 project_id
-    credentials = BasicCredentials(AK, SK).with_project_id(PROJECT_ID)
-    # 国际版通常使用 ap-southeast-1 (新加坡) 或 ap-southeast-3 (香港)
-    client = DnsClient.new_builder() \
-        .with_credentials(credentials) \
-        .with_region(DnsRegion.value_of("ap-southeast-1")) \
-        .build()
-
-    # 华为云线路名称映射 (根据你的华为云后台线路名称调整)
-    line_map = {"电信": "Dianxin", "联通": "Liantong", "移动": "Yidong"}
-
-    try:
-        # 1. 获取当前 Zone 下的所有带线路的记录
-        list_req = ListRecordSetsWithLineRequest()
-        list_req.zone_id = ZONE_ID
-        list_response = client.list_record_sets_with_line(list_req)
-        
-        # 建立当前记录字典 { "Dianxin": {"id": "xxx", "records": [...] } }
-        current_data = {}
-        for rs in list_response.recordsets:
-            if rs.name == DOMAIN and rs.type == "A":
-                current_data[rs.line] = {"id": rs.id, "records": sorted(rs.records)}
-
-        # 2. 遍历三网进行比对与更新
-        for carrier, new_ips in best_ips.items():
-            line_key = line_map[carrier]
-            new_ips_sorted = sorted(new_ips)
-
-            if line_key in current_data:
-                record_id = current_data[line_key]["id"]
-                old_ips = current_data[line_key]["records"]
-
-                if old_ips == new_ips_sorted:
-                    print(f"[{carrier}] IP 未变化，跳过更新。")
-                else:
-                    print(f"[{carrier}] 检测到变化: {old_ips} -> {new_ips_sorted}")
-                    # 使用 UpdateRecordSetRequest 更新特定 ID 的记录集
-                    update_req = UpdateRecordSetRequest()
-                    update_req.zone_id = ZONE_ID
-                    update_req.recordset_id = record_id
-                    update_req.body = UpdateRecordSetReq(records=new_ips_sorted)
-                    client.update_record_set(update_req)
-            else:
-                print(f"[{carrier}] 华为云后台未找到线路为 {line_key} 的 {DOMAIN} A 记录，请手动创建初始值。")
-
-    except exceptions.ClientRequestException as e:
-        print(f"请求异常: {e.error_code} - {e.error_msg}")
-
-if __name__ == "__main__":
-    sync_dns()
+    # 1. 获取最优 IP
+    target_ips = get_best_ips()
+    
+    if not any(target_ips.values()):
+        print("❌ 未能获取到任何有效 IP，程序退出。")
+    else:
+        # 2. 执行同步
+        manager = HuaWeiDNSManager(AK, SK, REGION, PRJ_ID)
+        manager.sync_dns(MY_ROOT_DOMAIN, MY_SUB_DOMAIN, target_ips)

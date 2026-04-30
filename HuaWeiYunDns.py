@@ -32,13 +32,17 @@ def get_best_ips():
         elif "移动" in line and len(ips["移动"]) < 3: ips["移动"].append(ip)
     return ips
 
+# 建议在 GitHub Secrets 中增加一个 HW_PROJECT_ID 变量
+PROJECT_ID = os.getenv("HW_PROJECT_ID") 
+
 def sync_dns():
     best_ips = get_best_ips()
     if not any(best_ips.values()):
         print("未获取到有效 IP，任务终止")
         return
 
-    credentials = BasicCredentials(AK, SK)
+    # 修改这里：显式指定 project_id
+    credentials = BasicCredentials(AK, SK).with_project_id(PROJECT_ID)
     # 国际版通常使用 ap-southeast-1 (新加坡) 或 ap-southeast-3 (香港)
     client = DnsClient.new_builder() \
         .with_credentials(credentials) \

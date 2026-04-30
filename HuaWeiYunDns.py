@@ -42,14 +42,14 @@ class HuaWeiDNSManager:
             print(f"❌ 获取 Zone ID 失败: {e}")
             return None
 
-    def sync_dns(self, root_domain, sub_domain, carrier_ips):
+    def sync_dns(self, root_domain, carrier_ips):
         """同步多线路 IP"""
         zone_id = self.get_zone_id(root_domain)
         if not zone_id:
             print(f"❌ 错误: 未找到域名 {root_domain} 的解析区")
             return
 
-        full_name = f"{sub_domain}.{root_domain}" if root_domain.endswith('.') else f"{sub_domain}.{root_domain}."
+        full_name = f"{root_domain}" if root_domain.endswith('.') else f"{root_domain}."
 
         try:
             req = ListRecordSetsWithLineRequest()
@@ -110,12 +110,11 @@ if __name__ == '__main__':
     
     # 你的域名信息
     ROOT_DOMAIN = "cfyx.19990816.xyz."
-    SUB_DOMAIN = ""
 
     best_ips = get_best_ips()
     
     if any(best_ips.values()):
         manager = HuaWeiDNSManager(ak, sk, region, prj_id)
-        manager.sync_dns(ROOT_DOMAIN, SUB_DOMAIN, best_ips)
+        manager.sync_dns(ROOT_DOMAIN, best_ips)
     else:
         print("❌ 未获取到有效 IP 数据")

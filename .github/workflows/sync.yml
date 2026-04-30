@@ -1,0 +1,30 @@
+name: Sync CF IPs to Huawei Cloud
+
+on:
+  repository_dispatch:
+    types: [trigger-update]
+  workflow_dispatch: # 保留手动执行按钮方便调试
+
+jobs:
+  update-dns:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install requests huaweicloudsdkdns
+
+      - name: Run Update Script
+        env:
+          HW_AK: ${{ secrets.HW_AK }}
+          HW_SK: ${{ secrets.HW_SK }}
+          HW_ZONE_ID: ${{ secrets.HW_ZONE_ID }}
+          DOMAIN: ${{ secrets.DOMAIN }}
+        run: python HuaWeiYunDns.py

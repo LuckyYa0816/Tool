@@ -1,9 +1,7 @@
 name: Sync CF IPs to Huawei Cloud
 
 on:
-  repository_dispatch:
-    types: [trigger-update]
-  workflow_dispatch: # 保留手动执行按钮方便调试
+  workflow_dispatch: 
 
 jobs:
   update-dns:

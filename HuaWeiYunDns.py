@@ -114,7 +114,7 @@ def get_best_ips():
     best = {
         "移动": _fetch_mobile_ips(),
         "联通": _fetch_junzhen_ips("https://cf.junzhen.qzz.io/best_ips.txt",    "联通"),
-        "电信": _fetch_junzhen_ips("https://cf.junzhen.qzz.io/best_ips_bj.txt", "电信"),
+        "电信": _fetch_junzhen_ips("https://cf.junzhen.qzz.io/best_ips_bj1.txt", "电信"),
     }
     missing = [carrier for carrier, ips in best.items() if not ips]
     if missing:

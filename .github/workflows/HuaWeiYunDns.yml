@@ -14,13 +14,13 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          cache: 'pip' # 1. 开启官方自带的 pip 依赖缓存
+          # 💡 移除了 cache: 'pip'，避免找不到 requirements.txt 报错
 
       - name: Install Dependencies
         run: |
           pip install requests huaweicloudsdkdns beautifulsoup4 playwright
 
-      # 2. 新增：缓存 Playwright 浏览器内核，避免每次重新下载 100MB+ 的文件
+      # ✅ 保留：缓存 Playwright 浏览器内核（这个是提速大头，不需要依赖文件）
       - name: Cache Playwright Browsers
         id: playwright-cache
         uses: actions/cache@v3
@@ -28,7 +28,7 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-chromium
 
-      # 3. 新增：如果缓存未命中，才下载 Chromium 浏览器（去掉 --with-deps 大幅提速）
+      # ✅ 保留：若缓存未命中，才重新下载 Chromium
       - name: Install Playwright Chromium
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: playwright install chromium

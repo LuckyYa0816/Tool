@@ -13,15 +13,14 @@ from huaweicloudsdkdns.v2.region.dns_region import DnsRegion
 from huaweicloudsdkcore.exceptions import exceptions
 
 # ── 全局配置 ──────────────────────────────────────────────────
-IP_COUNT = 1          # ← 每个运营商线路更新的 IP 数量，改这里即可
+IP_COUNT = 1          # ← 每个运营商线路更新的 IP 数量
 
 # 配置你的多个域名
 ROOT_DOMAIN_1 = "cfyx.19990816.xyz."
-ROOT_DOMAIN_2 = "cfyx.19990816.xyz."
-ROOT_DOMAIN_3 = "uouin.19990816.xyz."
+ROOT_DOMAIN_2 = "uouin.19990816.xyz."
 
 
-# ── 解析工具函数 ──────────────────────────────────────────────
+# ── 解析与验证工具函数 ──────────────────────────────────────────
 
 def _parse_speed(text):
     m = re.search(r'([\d.]+)\s*mb/s', text, re.IGNORECASE)
@@ -36,8 +35,14 @@ def _parse_latency(text):
     m = re.search(r'([\d.]+)\s*ms', text, re.IGNORECASE)
     return float(m.group(1)) if m else float('inf')
 
+def is_valid_ipv4(ip_str):
+    try:
+        return ipaddress.ip_address(ip_str).version == 4
+    except ValueError:
+        return False
 
-# ── 各运营商 IP 抓取函数 (原有逻辑) ──────────────────────────
+
+# ── 域名 1：各运营商 IP 抓取函数 (原有逻辑) ──────────────────────────
 
 def _fetch_mobile_ips():
     url = "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/best_ips.txt"
@@ -136,66 +141,8 @@ def get_best_ips_domain1():
     return best
 
 
-# ── 新增：从 demo.py 抓取 IP 的逻辑 ──────────────────────────
+# ── 域名 2：Uouin 页面实时抓取函数 (新增异步逻辑) ──────────────────
 
-def _fetch_demo_ips():
-    print(f"\n--- 开始获取 {ROOT_DOMAIN_2} 的优选 IP (来源: demo) ---")
-    url = "https://cfip.leilaomi.cc.cd/"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept-Language": "zh-CN,zh;q=0.9",
-    }
-    result = {"电信": [], "联通": [], "移动": []}
-    pane_map = {"pane-ct": "电信", "pane-cu": "联通", "pane-cm": "移动"}
-    
-    try:
-        resp = requests.get(url, headers=headers, timeout=15)
-        resp.raise_for_status()
-        resp.encoding = "utf-8"
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        for pane_id, isp_name in pane_map.items():
-            pane = soup.find("div", id=pane_id)
-            if not pane:
-                continue
-
-            candidates = []
-            for row in pane.find_all("tr", attrs={"data-ip": True, "data-tested": "1"}):
-                raw_ip = row.get("data-ip", "").strip()
-                if not raw_ip: continue
-                
-                # 若带有端口号，确保只提取 443 的 IP
-                if ':' in raw_ip:
-                    ip_part, port_part = raw_ip.split(':', 1)
-                    if port_part != '443':
-                        continue
-                    ip = ip_part
-                else:
-                    ip = raw_ip
-
-                cells = row.find_all("td")
-                delay_str = cells[4].get_text(strip=True) if len(cells) > 4 else "—"
-                speed_str = cells[5].get_text(strip=True) if len(cells) > 5 else "—"
-                
-                m_spd = re.search(r"(\d+)", speed_str)
-                speed = int(m_spd.group(1)) if m_spd else -1
-                
-                m_dly = re.search(r"(\d+)", delay_str)
-                delay = int(m_dly.group(1)) if m_dly else 9999
-                
-                candidates.append((ip, speed, delay))
-
-            # 排序：速度从高到低，延迟从低到高
-            candidates.sort(key=lambda x: (-x[1], x[2]))
-            top_ips = [c[0] for c in candidates[:IP_COUNT]]
-            result[isp_name] = top_ips
-            print(f"📡 demo源 [{isp_name}] 选取 {len(top_ips)} 个: {top_ips}")
-            
-        return result
-    except Exception as e:
-        print(f"❌ demo源 抓取失败: {e}")
-        return result
-        
 async def _fetch_uouin_live_ips():
     carrier_map = {"电信": [], "联通": [], "移动": []}
     async with async_playwright() as p:
@@ -266,14 +213,15 @@ async def _fetch_uouin_live_ips():
             print(f"❌ Uouin 页面抓取发生异常: {e}")
             await browser.close()
             return {c: [] for c in carrier_map}
-        
-def get_best_ips_domain3():
-    print(f"\n--- 开始获取 {ROOT_DOMAIN_3} 的优选 IP (Uouin 页面) ---")
+
+def get_best_ips_domain2():
+    print(f"\n--- 开始获取 {ROOT_DOMAIN_2} 的优选 IP (Uouin 页面) ---")
     try:
         return asyncio.run(_fetch_uouin_live_ips())
     except Exception as e:
         print(f"❌ 运行 Async Uouin 抓取失败: {e}")
         return {"电信": [], "联通": [], "移动": []}
+
 
 # ── 华为云 DNS 管理器 ─────────────────────────────────────────
 
@@ -329,16 +277,16 @@ class HuaWeiDNSManager:
                     rs = existing_map[line_code]
                     old_ips_sorted = sorted(rs.records)
                     if old_ips_sorted == new_ips_sorted:
-                        print(f"✅ [{carrier}] 无变动，跳过。")
+                        print(f"✅ [{root_domain}][{carrier}] 无变动，跳过。")
                     else:
-                        print(f"🔄 [{carrier}] 更新: {old_ips_sorted} -> {new_ips_sorted}")
+                        print(f"🔄 [{root_domain}][{carrier}] 更新: {old_ips_sorted} -> {new_ips_sorted}")
                         update_req = UpdateRecordSetRequest()
                         update_req.zone_id = zone_id
                         update_req.recordset_id = rs.id
                         update_req.body = UpdateRecordSetReq(records=new_ips_sorted)
                         self.client.update_record_set(update_req)
                 else:
-                    print(f"⚠️ [{carrier}] 华为云缺少 '{line_code}' 线路记录，请先手动创建。")
+                    print(f"⚠️ [{root_domain}][{carrier}] 华为云缺少 '{line_code}' 线路记录，请先手动创建。")
 
         except exceptions.ClientRequestException as e:
             print(f"❌ API 异常: {e.error_msg}")
@@ -355,23 +303,16 @@ if __name__ == '__main__':
     # 初始化管理器
     manager = HuaWeiDNSManager(ak, sk, region, prj_id)
 
-    # 任务 1：更新原有域名 (使用原来的抓取源)
+    # 任务 1：更新原有域名 cfyx.19990816.xyz.
     ips_domain1 = get_best_ips_domain1()
     if any(ips_domain1.values()):
         manager.sync_dns(ROOT_DOMAIN_1, ips_domain1)
     else:
         print(f"❌ 未获取到 {ROOT_DOMAIN_1} 的有效 IP 数据")
 
-    # 任务 2：更新新增域名 (使用 demo 网站源)
-    ips_domain2 = _fetch_demo_ips()
+    # 任务 2：更新新域名 yx.19990816.xyz. (来自 Uouin 动态网页抓取)
+    ips_domain2 = get_best_ips_domain2()
     if any(ips_domain2.values()):
         manager.sync_dns(ROOT_DOMAIN_2, ips_domain2)
     else:
         print(f"❌ 未获取到 {ROOT_DOMAIN_2} 的有效 IP 数据")
-        
-    # 任务 3：更新新增域名 (使用 uouin 网站源)
-    ips_domain3 = get_best_ips_domain3()
-    if any(ips_domain3.values()):
-        manager.sync_dns(ROOT_DOMAIN_3, ips_domain3)
-    else:
-        print(f"❌ 未获取到 {ROOT_DOMAIN_3} 的有效 IP 数据")

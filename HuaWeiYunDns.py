@@ -10,11 +10,10 @@ from huaweicloudsdkdns.v2.region.dns_region import DnsRegion
 from huaweicloudsdkcore.exceptions import exceptions
 
 # ── 全局配置 ──────────────────────────────────────────────────
-IP_COUNT = 2          # ← 每个运营商线路更新的 IP 数量，改这里即可
+IP_COUNT = 1          # ← 每个运营商线路更新的 IP 数量，改这里即可
 
 # 配置你的多个域名
 ROOT_DOMAIN_1 = "cfyx.19990816.xyz."
-ROOT_DOMAIN_2 = "yx.19990816.xyz."  # ← 在这里填入你要新增的第二个域名
 
 
 # ── 解析工具函数 ──────────────────────────────────────────────
@@ -131,68 +130,6 @@ def get_best_ips_domain1():
                 print(f"❌ 保底接口也未获取到 [{carrier}] 的 IP")
     return best
 
-
-# ── 新增：从 demo.py 抓取 IP 的逻辑 ──────────────────────────
-
-def _fetch_demo_ips():
-    print(f"\n--- 开始获取 {ROOT_DOMAIN_2} 的优选 IP (来源: demo) ---")
-    url = "https://cfip.leilaomi.cc.cd/"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept-Language": "zh-CN,zh;q=0.9",
-    }
-    result = {"电信": [], "联通": [], "移动": []}
-    pane_map = {"pane-ct": "电信", "pane-cu": "联通", "pane-cm": "移动"}
-    
-    try:
-        resp = requests.get(url, headers=headers, timeout=15)
-        resp.raise_for_status()
-        resp.encoding = "utf-8"
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        for pane_id, isp_name in pane_map.items():
-            pane = soup.find("div", id=pane_id)
-            if not pane:
-                continue
-
-            candidates = []
-            for row in pane.find_all("tr", attrs={"data-ip": True, "data-tested": "1"}):
-                raw_ip = row.get("data-ip", "").strip()
-                if not raw_ip: continue
-                
-                # 若带有端口号，确保只提取 443 的 IP
-                if ':' in raw_ip:
-                    ip_part, port_part = raw_ip.split(':', 1)
-                    if port_part != '443':
-                        continue
-                    ip = ip_part
-                else:
-                    ip = raw_ip
-
-                cells = row.find_all("td")
-                delay_str = cells[4].get_text(strip=True) if len(cells) > 4 else "—"
-                speed_str = cells[5].get_text(strip=True) if len(cells) > 5 else "—"
-                
-                m_spd = re.search(r"(\d+)", speed_str)
-                speed = int(m_spd.group(1)) if m_spd else -1
-                
-                m_dly = re.search(r"(\d+)", delay_str)
-                delay = int(m_dly.group(1)) if m_dly else 9999
-                
-                candidates.append((ip, speed, delay))
-
-            # 排序：速度从高到低，延迟从低到高
-            candidates.sort(key=lambda x: (-x[1], x[2]))
-            top_ips = [c[0] for c in candidates[:IP_COUNT]]
-            result[isp_name] = top_ips
-            print(f"📡 demo源 [{isp_name}] 选取 {len(top_ips)} 个: {top_ips}")
-            
-        return result
-    except Exception as e:
-        print(f"❌ demo源 抓取失败: {e}")
-        return result
-
-
 # ── 华为云 DNS 管理器 ─────────────────────────────────────────
 
 class HuaWeiDNSManager:
@@ -279,10 +216,3 @@ if __name__ == '__main__':
         manager.sync_dns(ROOT_DOMAIN_1, ips_domain1)
     else:
         print(f"❌ 未获取到 {ROOT_DOMAIN_1} 的有效 IP 数据")
-
-    # 任务 2：更新新增域名 (使用 demo 网站源)
-    ips_domain2 = _fetch_demo_ips()
-    if any(ips_domain2.values()):
-        manager.sync_dns(ROOT_DOMAIN_2, ips_domain2)
-    else:
-        print(f"❌ 未获取到 {ROOT_DOMAIN_2} 的有效 IP 数据")

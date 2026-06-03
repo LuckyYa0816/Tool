@@ -157,7 +157,7 @@ async def _fetch_uouin_live_ips():
         url = "https://api.uouin.com/cloudflare.html"
         
         try:
-            await page.goto(url, wait_until="networkidle", timeout=15000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=15000)
             await page.wait_for_selector("table tr:nth-child(2)", timeout=10000)
             content = await page.content()
             await browser.close()

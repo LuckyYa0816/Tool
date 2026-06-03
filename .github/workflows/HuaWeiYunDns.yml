@@ -17,7 +17,11 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install requests huaweicloudsdkdns beautifulsoup4
+          pip install requests huaweicloudsdkdns beautifulsoup4 playwright
+
+      - name: Install Playwright Chromium & Deps
+        run: |
+          playwright install chromium --with-deps
 
       - name: Run Update Script
         env:

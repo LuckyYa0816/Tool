@@ -14,6 +14,7 @@ from huaweicloudsdkcore.exceptions import exceptions
 
 # ── 全局配置 ──────────────────────────────────────────────────
 IP_COUNT = 1          # ← 每个运营商线路更新的 IP 数量
+SPEED_THRESHOLD_4K = 10.0 # ← 满足4K视频流畅观看的最低速度要求 (一般25Mbps左右即可)
 
 # 配置你的多个域名
 ROOT_DOMAIN_1 = "cfyx.19990816.xyz."
@@ -41,6 +42,29 @@ def is_valid_ipv4(ip_str):
     except ValueError:
         return False
 
+# 新增：统一的智能筛选与排序策略
+def _select_best_ips(candidates, count=IP_COUNT):
+    """
+    策略：
+    1. 筛选出速度达到 4K 标准的 IP (>= SPEED_THRESHOLD_4K)
+    2. 在满足4K标准的IP中，优先选延迟极低的（按延迟升序排序）
+    3. 如果没有任何IP满足4K标准，则妥协，直接选速度最快的（按速度降序排序）
+    """
+    if not candidates:
+        return []
+    
+    # 提取满足 4K 速度阈值的候选者
+    qualified_4k = [c for c in candidates if c[1] >= SPEED_THRESHOLD_4K]
+    
+    if qualified_4k:
+        # 满足条件时：优先延迟低 (x[2])，延迟一样的话选速度快 (-x[1])
+        qualified_4k.sort(key=lambda x: (x[2], -x[1]))
+        return [c[0] for c in qualified_4k[:count]]
+    else:
+        # 不满足条件时：优先选速度最快 (-x[1])，速度一样的话选延迟低 (x[2])
+        candidates.sort(key=lambda x: (-x[1], x[2]))
+        return [c[0] for c in candidates[:count]]
+
 
 # ── 域名 1：各运营商 IP 抓取函数 (原有逻辑) ──────────────────────────
 
@@ -58,8 +82,8 @@ def _fetch_mobile_ips():
             ip, port = parts[0].strip(), parts[1].strip()
             if port != '443': continue
             candidates.append((ip, _parse_speed(line), _parse_latency(line)))
-        candidates.sort(key=lambda x: (-x[1], x[2]))
-        result = [c[0] for c in candidates[:IP_COUNT]]
+            
+        result = _select_best_ips(candidates)
         print(f"📡 移动 原始候选 {len(candidates)} 条，选取 {IP_COUNT} 个: {result}")
         return result
     except Exception as e:
@@ -78,9 +102,10 @@ def _fetch_junzhen_ips(url, label):
             if len(parts) != 2: continue
             ip, port = parts[0].strip(), parts[1].strip()
             if port != '443': continue
-            candidates.append((ip, _parse_speed(line)))
-        candidates.sort(key=lambda x: -x[1])
-        result = [c[0] for c in candidates[:IP_COUNT]]
+            # 修改：补充获取延迟字段
+            candidates.append((ip, _parse_speed(line), _parse_latency(line)))
+            
+        result = _select_best_ips(candidates)
         print(f"📡 {label} 原始候选 {len(candidates)} 条，选取 {IP_COUNT} 个: {result}")
         return result
     except Exception as e:
@@ -112,8 +137,7 @@ def _fetch_fallback_ips(missing_carriers):
         result = {}
         for carrier in missing_carriers:
             candidates = carrier_map.get(carrier, [])
-            candidates.sort(key=lambda x: (-x[1], x[2]))
-            ips = [c[0] for c in candidates[:IP_COUNT]]
+            ips = _select_best_ips(candidates)
             print(f"🛡️ 保底 [{carrier}] 候选 {len(candidates)} 条，选取 {IP_COUNT} 个: {ips}")
             result[carrier] = ips
         return result
@@ -204,8 +228,7 @@ async def _fetch_uouin_live_ips():
             # 统一排序并过滤输出
             result = {}
             for carrier, candidates in carrier_map.items():
-                candidates.sort(key=lambda x: (-x[1], x[2]))  # 按速度降序，延迟升序
-                result[carrier] = [c[0] for c in candidates[:IP_COUNT]]
+                result[carrier] = _select_best_ips(candidates)
                 print(f"📡 Uouin 实时抓取 [{carrier}] 候选 {len(candidates)} 条，选取 {IP_COUNT} 个: {result[carrier]}")
             return result
 

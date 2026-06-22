@@ -2,23 +2,19 @@
 import os
 import re
 import requests
-import asyncio
 import ipaddress
-from bs4 import BeautifulSoup
-from collections import defaultdict
-from playwright.async_api import async_playwright
 from huaweicloudsdkcore.auth.credentials import BasicCredentials
 from huaweicloudsdkdns.v2 import *
 from huaweicloudsdkdns.v2.region.dns_region import DnsRegion
 from huaweicloudsdkcore.exceptions import exceptions
 
 # ── 全局配置 ──────────────────────────────────────────────────
-IP_COUNT = 1          # ← 每个运营商线路更新的 IP 数量
+IP_COUNT = 1          # ← 域名1：每个运营商线路更新的 IP 数量
 SPEED_THRESHOLD_4K = 10.0 # ← 满足4K视频流畅观看的最低速度要求 (一般25Mbps左右即可)
 
 # 配置你的多个域名
 ROOT_DOMAIN_1 = "cfyx.19990816.xyz."
-ROOT_DOMAIN_2 = "uouin.19990816.xyz."
+ROOT_DOMAIN_2 = "dns.19990816.xyz."
 
 
 # ── 解析与验证工具函数 ──────────────────────────────────────────
@@ -42,10 +38,9 @@ def is_valid_ipv4(ip_str):
     except ValueError:
         return False
 
-# 新增：统一的智能筛选与排序策略
 def _select_best_ips(candidates, count=IP_COUNT):
     """
-    策略：
+    策略(仅用于域名1)：
     1. 筛选出速度达到 4K 标准的 IP (>= SPEED_THRESHOLD_4K)
     2. 在满足4K标准的IP中，优先选延迟极低的（按延迟升序排序）
     3. 如果没有任何IP满足4K标准，则妥协，直接选速度最快的（按速度降序排序）
@@ -53,20 +48,17 @@ def _select_best_ips(candidates, count=IP_COUNT):
     if not candidates:
         return []
     
-    # 提取满足 4K 速度阈值的候选者
     qualified_4k = [c for c in candidates if c[1] >= SPEED_THRESHOLD_4K]
     
     if qualified_4k:
-        # 满足条件时：优先延迟低 (x[2])，延迟一样的话选速度快 (-x[1])
         qualified_4k.sort(key=lambda x: (x[2], -x[1]))
         return [c[0] for c in qualified_4k[:count]]
     else:
-        # 不满足条件时：优先选速度最快 (-x[1])，速度一样的话选延迟低 (x[2])
         candidates.sort(key=lambda x: (-x[1], x[2]))
         return [c[0] for c in candidates[:count]]
 
 
-# ── 域名 1：各运营商 IP 抓取函数 (原有逻辑) ──────────────────────────
+# ── 域名 1：各运营商 IP 抓取函数 ──────────────────────────
 
 def _fetch_mobile_ips():
     url = "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/best_ips.txt"
@@ -102,7 +94,6 @@ def _fetch_junzhen_ips(url, label):
             if len(parts) != 2: continue
             ip, port = parts[0].strip(), parts[1].strip()
             if port != '443': continue
-            # 修改：补充获取延迟字段
             candidates.append((ip, _parse_speed(line), _parse_latency(line)))
             
         result = _select_best_ips(candidates)
@@ -165,85 +156,39 @@ def get_best_ips_domain1():
     return best
 
 
-# ── 域名 2：Uouin 页面实时抓取函数 (新增异步逻辑) ──────────────────
+# ── 域名 2：全量获取 API 节点 (默认线路，不筛选) ──────────────────
 
-async def _fetch_uouin_live_ips():
-    carrier_map = {"电信": [], "联通": [], "移动": []}
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=['--disable-blink-features=AutomationControlled']
-        )
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        )
-        page = await context.new_page()
-        url = "https://api.uouin.com/cloudflare.html"
-        
-        try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=15000)
-            await page.wait_for_selector("table tr:nth-child(2)", timeout=10000)
-            content = await page.content()
-            await browser.close()
-
-            soup = BeautifulSoup(content, 'html.parser')
-            table = soup.find('table')
-            if not table:
-                print("❌ Uouin 页面未找到表格元素")
-                return {c: [] for c in carrier_map}
-
-            rows = table.find_all('tr')
-            ipv4_pattern = r'(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)'
-
-            for row in rows:
-                cols = row.find_all('td')
-                if len(cols) >= 6:
-                    line = cols[0].get_text(strip=True)
-                    if "IPv6" in line.upper():
-                        continue
-
-                    row_html = str(row)
-                    found_ips = re.findall(ipv4_pattern, row_html)
-
-                    valid_ip = None
-                    for candidate in found_ips:
-                        if is_valid_ipv4(candidate):
-                            valid_ip = candidate
-                            break
-                    if not valid_ip:
-                        continue
-
-                    latency_text = cols[3].get_text(strip=True)
-                    speed_text = cols[4].get_text(strip=True)
-                    
-                    latency = _parse_latency(latency_text)
-                    speed = _parse_speed(speed_text)
-
-                    # 分流归类到三大运营商
-                    for carrier in carrier_map:
-                        if carrier in line:
-                            carrier_map[carrier].append((valid_ip, speed, latency))
-                            break
-
-            # 统一排序并过滤输出
-            result = {}
-            for carrier, candidates in carrier_map.items():
-                result[carrier] = _select_best_ips(candidates)
-                print(f"📡 Uouin 实时抓取 [{carrier}] 候选 {len(candidates)} 条，选取 {IP_COUNT} 个: {result[carrier]}")
-            return result
-
-        except Exception as e:
-            print(f"❌ Uouin 页面抓取发生异常: {e}")
-            await browser.close()
-            return {c: [] for c in carrier_map}
-
-def get_best_ips_domain2():
-    print(f"\n--- 开始获取 {ROOT_DOMAIN_2} 的优选 IP (Uouin 页面) ---")
+def get_all_ips_domain2():
+    print(f"\n--- 开始获取 {ROOT_DOMAIN_2} 的全量节点 IP (TMY API) ---")
+    url = "https://dns.tmy.dpdns.org/api/best-nodes?token=ODQ4NTg4NzEydF9lbWJ5X3NlY3VyZV9zYWx0"
     try:
-        return asyncio.run(_fetch_uouin_live_ips())
+        response = requests.get(url, timeout=15)
+        lines = response.text.splitlines()
+        
+        candidates = []
+        for line in lines:
+            line = line.strip()
+            if not line: continue
+            
+            # 接口返回格式示例: 64.90.5.14:443#HK
+            ip_port_part = line.split('#')[0].strip()
+            parts = ip_port_part.split(':')
+            ip = parts[0].strip()
+            
+            # 校验是否为合法 IPv4，避免混入无关字符
+            if is_valid_ipv4(ip):
+                # 排除重复IP，直接添加，不进行测速和延迟筛选
+                if ip not in candidates:
+                    candidates.append(ip)
+
+        print(f"📡 TMY 接口全量抓取到 {len(candidates)} 个 IP: {candidates}")
+        
+        # 将结果归属到“默认”线路中，供华为云直接更新
+        return {"默认": candidates}
+        
     except Exception as e:
-        print(f"❌ 运行 Async Uouin 抓取失败: {e}")
-        return {"电信": [], "联通": [], "移动": []}
+        print(f"❌ TMY 接口抓取失败: {e}")
+        return {"默认": []}
 
 
 # ── 华为云 DNS 管理器 ─────────────────────────────────────────
@@ -259,7 +204,8 @@ class HuaWeiDNSManager:
             .build()
 
     def get_line_code(self, carrier_name):
-        lines = {'电信': 'Dianxin', '联通': 'Liantong', '移动': 'Yidong'}
+        # 增加 '默认': 'default' 映射
+        lines = {'电信': 'Dianxin', '联通': 'Liantong', '移动': 'Yidong', '默认': 'default'}
         return lines.get(carrier_name, None)
 
     def get_zone_id(self, domain):
@@ -333,8 +279,8 @@ if __name__ == '__main__':
     else:
         print(f"❌ 未获取到 {ROOT_DOMAIN_1} 的有效 IP 数据")
 
-    # 任务 2：更新新域名 yx.19990816.xyz. (来自 Uouin 动态网页抓取)
-    ips_domain2 = get_best_ips_domain2()
+    # 任务 2：更新新域名 dns.19990816.xyz. (全量更新到默认线路)
+    ips_domain2 = get_all_ips_domain2()
     if any(ips_domain2.values()):
         manager.sync_dns(ROOT_DOMAIN_2, ips_domain2)
     else:

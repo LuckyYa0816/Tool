@@ -170,20 +170,15 @@ def get_all_ips_domain2():
             line = line.strip()
             if not line: continue
             
-            # 接口返回格式示例: 64.90.5.14:443#HK
             ip_port_part = line.split('#')[0].strip()
             parts = ip_port_part.split(':')
             ip = parts[0].strip()
             
-            # 校验是否为合法 IPv4，避免混入无关字符
             if is_valid_ipv4(ip):
-                # 排除重复IP，直接添加，不进行测速和延迟筛选
                 if ip not in candidates:
                     candidates.append(ip)
 
         print(f"📡 TMY 接口全量抓取到 {len(candidates)} 个 IP: {candidates}")
-        
-        # 将结果归属到“默认”线路中，供华为云直接更新
         return {"默认": candidates}
         
     except Exception as e:
@@ -204,7 +199,6 @@ class HuaWeiDNSManager:
             .build()
 
     def get_line_code(self, carrier_name):
-        # 增加 '默认': 'default' 映射
         lines = {'电信': 'Dianxin', '联通': 'Liantong', '移动': 'Yidong', '默认': 'default'}
         return lines.get(carrier_name, None)
 
@@ -241,9 +235,24 @@ class HuaWeiDNSManager:
                 if not line_code:
                     print(f"⚠️ [{carrier}] 未知运营商，跳过。")
                     continue
+                
                 new_ips_sorted = sorted(ips)
-                if line_code in existing_map:
-                    rs = existing_map[line_code]
+                
+                # ── 核心修复逻辑：智能匹配华为云返回的多种默认线路 Key ──
+                target_key = None
+                if carrier == '默认':
+                    # 依次尝试匹配各种可能的默认线路标识
+                    for possible_key in ['default', '', None, 'Default']:
+                        if possible_key in existing_map:
+                            target_key = possible_key
+                            break
+                else:
+                    if line_code in existing_map:
+                        target_key = line_code
+
+                # 如果找到了匹配的云端线路
+                if target_key is not None:
+                    rs = existing_map[target_key]
                     old_ips_sorted = sorted(rs.records)
                     if old_ips_sorted == new_ips_sorted:
                         print(f"✅ [{root_domain}][{carrier}] 无变动，跳过。")
@@ -256,6 +265,7 @@ class HuaWeiDNSManager:
                         self.client.update_record_set(update_req)
                 else:
                     print(f"⚠️ [{root_domain}][{carrier}] 华为云缺少 '{line_code}' 线路记录，请先手动创建。")
+                    print(f"   💡 提示: 当前云端已存在的线路代码有: {list(existing_map.keys())}")
 
         except exceptions.ClientRequestException as e:
             print(f"❌ API 异常: {e.error_msg}")

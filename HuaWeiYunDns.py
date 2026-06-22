@@ -242,7 +242,7 @@ class HuaWeiDNSManager:
                 target_key = None
                 if carrier == '默认':
                     # 依次尝试匹配各种可能的默认线路标识
-                    for possible_key in ['default', '', None, 'Default']:
+                    for possible_key in ['default', '', None, 'Default','default_view']:
                         if possible_key in existing_map:
                             target_key = possible_key
                             break

@@ -1,0 +1,34 @@
+name: Single IP Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      ip:
+        description: 'IP:port (例如 174.138.24.13:443)'
+        required: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.check.outputs.result }}
+    steps:
+      - name: Detect
+        id: check
+        run: |
+          IP_PORT="${{ github.event.inputs.ip }}"
+          IP=$(echo "$IP_PORT" | cut -d: -f1)
+          PORT=$(echo "$IP_PORT" | cut -d: -f2)
+
+          if [ -z "$IP" ] || [ -z "$PORT" ]; then
+            echo "result=invalid_format" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          HEADERS=$(curl -skI --resolve "cloudflare.com:$PORT:$IP" https://cloudflare.com/ 2>&1)
+
+          if echo "$HEADERS" | grep -qi 'Server:\s*cloudflare'; then
+            echo "result=valid" >> $GITHUB_OUTPUT
+          else
+            echo "result=invalid" >> $GITHUB_OUTPUT
+          fi

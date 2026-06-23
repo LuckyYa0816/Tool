@@ -158,7 +158,7 @@ def get_best_ips_domain1():
 
 # ── 域名 2：全量获取 API 节点 (默认线路，不筛选) ──────────────────
 
-def get_all_ips_domain2(max_ips=50):
+def get_all_ips_domain2(max_ips=5):
     print(f"\n--- 开始获取 {ROOT_DOMAIN_2} 的全量节点 IP (TMY API)，最多 {max_ips} 个 ---")
     url = "https://dns.tmy.dpdns.org/api/best-nodes?token=ODQ4NTg4NzEydF9lbWJ5X3NlY3VyZV9zYWx0"
     try:

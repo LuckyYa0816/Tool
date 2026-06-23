@@ -1,7 +1,9 @@
 name: Sync CF IPs to Huawei Cloud
 
 on:
-  workflow_dispatch: 
+  schedule:
+    - cron: '6 * * * *' 
+  workflow_dispatch:  
 
 jobs:
   update-dns:

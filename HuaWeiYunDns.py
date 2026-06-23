@@ -158,8 +158,8 @@ def get_best_ips_domain1():
 
 # ── 域名 2：全量获取 API 节点 (默认线路，不筛选) ──────────────────
 
-def get_all_ips_domain2():
-    print(f"\n--- 开始获取 {ROOT_DOMAIN_2} 的全量节点 IP (TMY API) ---")
+def get_all_ips_domain2(max_ips=50):
+    print(f"\n--- 开始获取 {ROOT_DOMAIN_2} 的全量节点 IP (TMY API)，最多 {max_ips} 个 ---")
     url = "https://dns.tmy.dpdns.org/api/best-nodes?token=ODQ4NTg4NzEydF9lbWJ5X3NlY3VyZV9zYWx0"
     try:
         response = requests.get(url, timeout=15)
@@ -168,7 +168,8 @@ def get_all_ips_domain2():
         candidates = []
         for line in lines:
             line = line.strip()
-            if not line: continue
+            if not line:
+                continue
             
             ip_port_part = line.split('#')[0].strip()
             parts = ip_port_part.split(':')
@@ -177,8 +178,11 @@ def get_all_ips_domain2():
             if is_valid_ipv4(ip):
                 if ip not in candidates:
                     candidates.append(ip)
+                    # 达到目标数量后提前终止，节省时间
+                    if len(candidates) >= max_ips:
+                        break
 
-        print(f"📡 TMY 接口全量抓取到 {len(candidates)} 个 IP: {candidates}")
+        print(f"📡 TMY 接口抓取到 {len(candidates)} 个 IP（上限 {max_ips}）: {candidates}")
         return {"默认": candidates}
         
     except Exception as e:

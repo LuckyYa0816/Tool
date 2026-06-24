@@ -28,4 +28,7 @@ jobs:
           HW_SK: ${{ secrets.HW_SK }}
           HW_PROJECT_ID: ${{ secrets.HW_PROJECT_ID }}
           HW_REGION: ${{ secrets.HW_REGION }}
+          # 新增下面这两个环境变量，用于和 CF Worker 通信
+          WORKER_URL: ${{ secrets.WORKER_URL }} 
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
         run: python HuaWeiYunDns.py
